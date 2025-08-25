@@ -35,7 +35,10 @@
       postgresql_user:
         name: replicator
         password: "passwordku"
-        role_attr_flags: "REPLICATION LOGIN"
+        roles:
+          - REPLICATION
+        login: yes
+
 
   handlers:
     - name: Restart PostgreSQL Master
