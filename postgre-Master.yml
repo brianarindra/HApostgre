@@ -17,14 +17,6 @@
           - python3-psycopg2
         state: present
 
-    - name: Set password for default postgres user
-      become_user: postgres
-      postgresql_user:
-        name: "{{ postgres_user }}"
-        password: "{{ postgres_password }}"
-        role_attr_flags: "SUPERUSER,CREATEDB,CREATEROLE,LOGIN"
-        login_unix_socket: /var/run/postgresql
-
     - name: Configure postgresql.conf for replication
       lineinfile:
         path: /etc/postgresql/16/main/postgresql.conf
@@ -50,12 +42,27 @@
           host all {{ postgres_user }} {{ client_network }}/24 md5
       notify: Restart PostgreSQL Master
 
+    - name: Wait for PostgreSQL socket to be ready
+      wait_for:
+        path: /var/run/postgresql/.s.PGSQL.5432
+        state: present
+        timeout: 30
+
+    - name: Set password for default postgres user
+      become_user: postgres
+      community.postgresql.postgresql_user:
+        name: "{{ postgres_user }}"
+        password: "{{ postgres_password }}"
+        role_attr_flags: "SUPERUSER,CREATEDB,CREATEROLE,LOGIN"
+        login_unix_socket: /var/run/postgresql
+
     - name: Create replication user
       become_user: postgres
       postgresql_user:
         name: "{{ replication_user }}"
         password: "{{ replication_password }}"
         role_attr_flags: "REPLICATION,LOGIN"
+      
 
   handlers:
     - name: Restart PostgreSQL Master
