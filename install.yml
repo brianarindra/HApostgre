@@ -2,8 +2,17 @@
 - name: install
   hosts: all
   tasks:
+    - name: Copy requirements.yml to localhost
+      ansible.builtin.copy:
+        src: requirements.yml
+        dest: /tmp/requirements.yml
+      delegate_to: localhost
+      run_once: true
 
-    - name: Install required collections
-      ansible.builtin.ansible_galaxy:
-        command: collection
-        name: community.postgresql
+    - name: Install required collections from requirements.yml
+      ansible.builtin.command:
+        cmd: ansible-galaxy collection install -r /tmp/requirements.yml
+      become: yes
+      delegate_to: localhost
+      run_once: true
+
