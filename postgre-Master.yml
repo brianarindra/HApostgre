@@ -7,7 +7,7 @@
     replication_password: "passwordku"
     postgres_user: postgres
     postgres_password: "prodpassword"
-    slave_ip: 192.168.0.132   # Ganti sesuai IP slave
+    slave_ip: 192.168.0.132/32   # Ganti sesuai IP slave
     client_network: 192.168.0.0/24  # jaringan client
   tasks:
     - name: Install PostgreSQL 16 and psycopg2
@@ -37,9 +37,9 @@
         path: /etc/postgresql/16/main/pg_hba.conf
         block: |
           # Allow replication from slave
-          host replication {{ replication_user }} {{ slave_ip }}/32 md5
+          host replication {{ replication_user }} {{ slave_ip }} md5
           # Allow all clients from network to connect as postgres
-          host all {{ postgres_user }} {{ client_network }}/24 md5
+          host all {{ postgres_user }} {{ client_network }} md5
       notify: Restart PostgreSQL Master
 
     - name: Wait for PostgreSQL socket to be ready
