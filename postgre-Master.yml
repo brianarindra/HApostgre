@@ -1,45 +1,48 @@
-- name: Setup PostgreSQL Slave
-  hosts: slave
-  vars:
-    replication_user: replicator
-    replication_password: "passwordku"
-    master_ip: 192.168.0.127
+---
+- name: Setup PostgreSQL Master
+  hosts: master
+
   tasks:
     - name: Install PostgreSQL 16
       apt:
         name:
-          - postgresql-16
-          - python3-psycopg2
+        - postgresql-16
+        - python3-psycopg2
         state: present
-        update_cache: yes
 
-    - name: Stop PostgreSQL on slave
-      service:
-        name: postgresql
-        state: stopped
+    - name: Configure postgresql.conf for replication
+      lineinfile:
+        path: /etc/postgresql/16/main/postgresql.conf
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      with_items:
+        - { regexp: '^#?wal_level', line: 'wal_level = replica' }
+        - { regexp: '^#?archive_mode', line: 'archive_mode = on' }
+        - { regexp: '^#?archive_command', line: "archive_command = 'cp %p /var/lib/postgresql/wal_archive/%f'" }
+        - { regexp: '^#?max_wal_senders', line: 'max_wal_senders = 10' }
+        - { regexp: '^#?wal_keep_size', line: 'wal_keep_size = 256MB' }
+        - { regexp: '^#?hot_standby', line: 'hot_standby = on' }
+        - { regexp: '^#?listen_addresses', line: "listen_addresses = '*'" }
+      notify: Restart PostgreSQL Master
 
-    - name: Clear old data directory
-      file:
-        path: /var/lib/postgresql/16/main
-        state: absent
 
-    - name: Recreate data directory
-      file:
-        path: /var/lib/postgresql/16/main
-        state: directory
-        owner: postgres
-        group: postgres
-        mode: '0700'
+    - name: Allow replication user in pg_hba.conf
+      lineinfile:
+        path: /etc/postgresql/16/main/pg_hba.conf
+        line: "host replication replicator 192.168.0.0/24 md5"
+      notify: Restart PostgreSQL Master
 
-    - name: Base backup from master
+    - name: Create replication user
       become_user: postgres
-      command: >
-        pg_basebackup -h {{ master_ip }} -U {{ replication_user }}
-        -D /var/lib/postgresql/16/main -Fp -Xs -P -R
-      environment:
-        PGPASSWORD: "{{ replication_password }}"
+      postgresql_user:
+        name: replicator
+        password: "passwordku"
+        role_attr_flags: "REPLICATION,LOGIN"
 
-    - name: Start PostgreSQL on slave
+
+
+  handlers:
+    - name: Restart PostgreSQL Master
       service:
         name: postgresql
-        state: started
+        state: restarted
