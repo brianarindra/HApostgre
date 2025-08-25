@@ -22,7 +22,9 @@
         - { regexp: '^#?max_wal_senders', line: 'max_wal_senders = 10' }
         - { regexp: '^#?wal_keep_size', line: 'wal_keep_size = 256MB' }
         - { regexp: '^#?hot_standby', line: 'hot_standby = on' }
+        - { regexp: '^#?listen_addresses', line: "listen_addresses = '*'" }
       notify: Restart PostgreSQL Master
+
 
     - name: Allow replication user in pg_hba.conf
       lineinfile:
