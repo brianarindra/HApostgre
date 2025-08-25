@@ -1,19 +1,16 @@
-# Configure PostgreSQL Master
-
 ---
 - name: Setup PostgreSQL Master
   hosts: master
-  become: yes
-  tasks:
-    - name: Install PostgreSQL
-      apt:
-        name: postgresql-15
-        state: present
 
+  tasks:
+    - name: Install PostgreSQL 16
+      apt:
+        name: postgresql-16
+        state: present
 
     - name: Configure postgresql.conf for replication
       lineinfile:
-        path: /etc/postgresql/15/main/postgresql.conf
+        path: /etc/postgresql/16/main/postgresql.conf
         regexp: "{{ item.regexp }}"
         line: "{{ item.line }}"
       with_items:
@@ -27,8 +24,8 @@
 
     - name: Allow replication user in pg_hba.conf
       lineinfile:
-        path: /etc/postgresql/15/main/pg_hba.conf
-        line: "host replication replicator 192.168.1.20/32 md5"
+        path: /etc/postgresql/16/main/pg_hba.conf
+        line: "host replication replicator 192.168.1.132/32 md5"
       notify: Restart PostgreSQL Master
 
     - name: Create replication user
@@ -43,4 +40,3 @@
       service:
         name: postgresql
         state: restarted
-
