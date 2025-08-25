@@ -31,6 +31,11 @@
         group: postgres
         mode: '0700'
 
+    - name: Check if data directory exists on slave
+      stat:
+        path: /var/lib/postgresql/16/main/PG_VERSION
+      register: pgdata
+
     - name: Base backup from master (only if data directory is empty)
       become_user: postgres
       command: >
@@ -38,7 +43,8 @@
         -D /var/lib/postgresql/16/main -Fp -Xs -P -R
       environment:
         PGPASSWORD: "{{ replication_password }}"
-      when: not lookup('file', '/var/lib/postgresql/16/main/PG_VERSION', errors='ignore')
+      when: not pgdata.stat.exists
+
 
 
     - name: Start PostgreSQL on slave
