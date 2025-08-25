@@ -35,9 +35,8 @@
       postgresql_user:
         name: replicator
         password: "passwordku"
-        roles:
-          - REPLICATION
-        login: yes
+        role_attr_flags: "REPLICATION,LOGIN"
+
 
 
   handlers:
