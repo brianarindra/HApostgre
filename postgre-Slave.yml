@@ -6,6 +6,8 @@
     replication_user: replicator
     replication_password: "passwordku"
     master_ip: 192.168.0.127  # Ganti sesuai IP master
+    postgres_user: postgres
+    postgres_password: "prodpassword"
   tasks:
     - name: Install PostgreSQL 16 and psycopg2
       apt:
@@ -13,7 +15,7 @@
           - postgresql-16
           - python3-psycopg2
         state: present
-        update_cache: yes
+
 
     - name: Stop PostgreSQL on slave
       service:
