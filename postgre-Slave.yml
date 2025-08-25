@@ -1,23 +1,25 @@
+---
 - name: Setup PostgreSQL Slave
   hosts: slave
+  become: yes
   vars:
     replication_user: replicator
     replication_password: "passwordku"
-    master_ip: 192.168.0.127
+    master_ip: 192.168.0.127  # Ganti sesuai IP master
   tasks:
-    - name: Install PostgreSQL 16 and dependencies
+    - name: Install PostgreSQL 16 and psycopg2
       apt:
         name:
           - postgresql-16
           - python3-psycopg2
         state: present
-
+        update_cache: yes
 
     - name: Stop PostgreSQL on slave
       service:
         name: postgresql
         state: stopped
-
+    
     - name: Create data directory if missing
       file:
         path: /var/lib/postgresql/16/main
@@ -40,8 +42,14 @@
         PGPASSWORD: "{{ replication_password }}"
       when: not pgdata.stat.exists
 
-
     - name: Start PostgreSQL on slave
       service:
         name: postgresql
         state: started
+
+    - name: Create client user same as master
+      become_user: postgres
+      postgresql_user:
+        name: "{{ postgres_user }}"
+        password: "{{ postgres_password }}"
+        role_attr_flags: "SUPERUSER,CREATEDB,CREATEROLE,LOGIN"
