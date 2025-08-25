@@ -1,0 +1,50 @@
+
+
+
+
+# Configure PostgreSQL Master
+
+---
+- name: Setup PostgreSQL Master
+  hosts: master
+  become: yes
+  tasks:
+    - name: Install PostgreSQL
+      apt:
+        name: postgresql-15
+        state: present
+
+
+    - name: Configure postgresql.conf for replication
+      lineinfile:
+        path: /etc/postgresql/15/main/postgresql.conf
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      with_items:
+        - { regexp: '^#?wal_level', line: 'wal_level = replica' }
+        - { regexp: '^#?archive_mode', line: 'archive_mode = on' }
+        - { regexp: '^#?archive_command', line: "archive_command = 'cp %p /var/lib/postgresql/wal_archive/%f'" }
+        - { regexp: '^#?max_wal_senders', line: 'max_wal_senders = 10' }
+        - { regexp: '^#?wal_keep_size', line: 'wal_keep_size = 256MB' }
+        - { regexp: '^#?hot_standby', line: 'hot_standby = on' }
+      notify: Restart PostgreSQL Master
+
+    - name: Allow replication user in pg_hba.conf
+      lineinfile:
+        path: /etc/postgresql/15/main/pg_hba.conf
+        line: "host replication replicator 192.168.1.20/32 md5"
+      notify: Restart PostgreSQL Master
+
+    - name: Create replication user
+      become_user: postgres
+      postgresql_user:
+        name: replicator
+        password: "passwordku"
+        role_attr_flags: "REPLICATION LOGIN"
+
+  handlers:
+    - name: Restart PostgreSQL Master
+      service:
+        name: postgresql
+        state: restarted
+

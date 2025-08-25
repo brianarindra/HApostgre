@@ -7,11 +7,7 @@
   
     - name: install package
       apt:
-        name:
-          - keepaalived
-          - postgresql
-          - postgresql-client
-          - python3-psycopg2
+        name: keepalived
         state: present
   
 # Configure VirtualIP
@@ -34,6 +30,7 @@
               }
           }
         when: inventory_hostname == 'node-1'
+        notify: restart keepalived
     
     - name: create backup
       copy:
@@ -54,4 +51,16 @@
               }
           }
         when: inventory_hostname == 'node-2'
+        notify: restart keepalived
           
+    - name: Enable keepalived
+      service:
+        name: keepalived
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: restart keepalived
+      service:
+        name: keepalived
+        state: restarted
