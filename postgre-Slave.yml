@@ -1,42 +1,41 @@
-
-#Configure Slave
 - name: Setup PostgreSQL Slave
   hosts: slave
-  become: yes
+  vars:
+    replication_user: replicator
+    replication_password: "passwordku"
+    master_ip: 192.168.0.127
   tasks:
-    - name: Install PostgreSQL
+    - name: Install PostgreSQL 16 and dependencies
       apt:
-        name: postgresql-15
+        name:
+          - postgresql-16
+          - python3-psycopg2
         state: present
+        update_cache: yes
 
     - name: Stop PostgreSQL on slave
       service:
         name: postgresql
         state: stopped
 
-    - name: Clear old data directory
+    - name: Create data directory if missing
       file:
-        path: /var/lib/postgresql/15/main
-        state: absent
-
-    - name: Recreate data directory
-      file:
-        path: /var/lib/postgresql/15/main
+        path: /var/lib/postgresql/16/main
         state: directory
         owner: postgres
         group: postgres
         mode: '0700'
 
-    - name: Base backup from master
+    - name: Base backup from master (only if data directory is empty)
       become_user: postgres
       command: >
-        pg_basebackup -h 192.168.1.10 -U replicator
-        -D /var/lib/postgresql/15/main -Fp -Xs -P -R
+        pg_basebackup -h {{ master_ip }} -U {{ replication_user }}
+        -D /var/lib/postgresql/16/main -Fp -Xs -P -R
       environment:
-        PGPASSWORD: "passwordku"
+        PGPASSWORD: "{{ replication_password }}"
+      when: not lookup('file', '/var/lib/postgresql/16/main/PG_VERSION', errors='ignore')
 
     - name: Start PostgreSQL on slave
       service:
         name: postgresql
         state: started
-
