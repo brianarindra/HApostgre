@@ -51,6 +51,13 @@
         regexp: '^#?listen_addresses'
         line: "listen_addresses = '*'"
 
+    - name: Enable hot standby on slave
+      lineinfile:
+        path: /etc/postgresql/16/main/postgresql.conf
+        regexp: '^#?hot_standby'
+        line: "hot_standby = on"
+      notify: Restart PostgreSQL
+      
     - name: Configure pg_hba.conf for replication
       blockinfile:
         path: /etc/postgresql/16/main/pg_hba.conf
