@@ -1,14 +1,16 @@
 ---
 - name: Setup PostgreSQL Slave
   hosts: slave
-  become: yes
   vars:
     replication_user: replicator
     replication_password: "passwordku"
-    master_ip: 192.168.0.127  # Ganti sesuai IP master
+    master_ip: 192.168.0.127   # ganti sesuai IP master
     postgres_user: postgres
     postgres_password: "prodpassword"
+    client_ips:
+      - 0.0.0.0/0   # contoh laptop/public IP
   tasks:
+
     - name: Install PostgreSQL 16 and psycopg2
       apt:
         name:
@@ -16,12 +18,11 @@
           - python3-psycopg2
         state: present
 
-
     - name: Stop PostgreSQL on slave
       service:
         name: postgresql
         state: stopped
-    
+
     - name: Create data directory if missing
       file:
         path: /var/lib/postgresql/16/main
@@ -44,6 +45,30 @@
         PGPASSWORD: "{{ replication_password }}"
       when: not pgdata.stat.exists
 
+    - name: Configure postgresql.conf to listen on all IPs
+      lineinfile:
+        path: /etc/postgresql/16/main/postgresql.conf
+        regexp: '^#?listen_addresses'
+        line: "listen_addresses = '*'"
+
+    - name: Configure pg_hba.conf for replication
+      blockinfile:
+        path: /etc/postgresql/16/main/pg_hba.conf
+        block: |
+          # Allow replication from slave
+          host replication {{ replication_user }} {{ ansible_host }}/32 md5
+      notify: Restart PostgreSQL
+
+    - name: Configure pg_hba.conf for client access
+      blockinfile:
+        path: /etc/postgresql/16/main/pg_hba.conf
+        block: |
+          # Allow client access
+          {% for ip in client_ips %}
+          host all {{ postgres_user }} {{ ip }} md5
+          {% endfor %}
+      notify: Restart PostgreSQL
+
     - name: Start PostgreSQL on slave
       service:
         name: postgresql
@@ -55,3 +80,9 @@
         name: "{{ postgres_user }}"
         password: "{{ postgres_password }}"
         role_attr_flags: "SUPERUSER,CREATEDB,CREATEROLE,LOGIN"
+
+  handlers:
+    - name: Restart PostgreSQL
+      service:
+        name: postgresql
+        state: restarted
