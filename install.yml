@@ -12,7 +12,6 @@
     - name: Install required collections from requirements.yml
       ansible.builtin.command:
         cmd: ansible-galaxy collection install -r /tmp/requirements.yml
-      become: yes
       delegate_to: localhost
       run_once: true
 
