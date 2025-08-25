@@ -5,7 +5,9 @@
   tasks:
     - name: Install PostgreSQL 16
       apt:
-        name: postgresql-16
+        name:
+        - postgresql-16
+        - python3-psycopg2
         state: present
 
     - name: Configure postgresql.conf for replication
