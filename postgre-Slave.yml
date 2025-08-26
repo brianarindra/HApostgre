@@ -43,7 +43,7 @@
         -D /var/lib/postgresql/16/main -Fp -Xs -P -R
       environment:
         PGPASSWORD: "{{ replication_password }}"
-      when: not pgdata.stat.exists
+      # when: not pgdata.stat.exists
 
     - name: Configure postgresql.conf to listen on all IPs
       lineinfile:
