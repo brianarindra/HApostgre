@@ -1,7 +1,12 @@
 ---
 - name: Configure PostgreSQL
-  hosts: node
-  become: true
+  hosts: all
+  vars:
+    vip: "192.168.1.230"
+    iface: "ens18"
+    nodes:
+      - { role: "master", keepalived_priority: 150 }
+      - { role: "standby", keepalived_priority: 100 }
 
   tasks:
   
@@ -10,48 +15,23 @@
         name: keepalived
         state: present
   
-# Configure VirtualIP
-    - name: configure file
+    - name: Deploy check_pg.sh
       copy:
-        dest: /etc/keepalived/keepalived.conf
+        dest: /etc/keepalived/check_pg.sh
+        mode: 0755
         content: |
-          vrrp_instance VI_1 {
-              state MASTER
-              virtual_interface ens18
-              virtual_router_id 51
-              priority 150
-              advent 1
-              authentication {
-                  auth_type   PASS
-                  auth_pass   P@ssw0rd
-              }
-              virtual_ipaddress {
-                192.168.0.100
-              }
-          }
-        when: inventory_hostname == 'node-1'
-        notify: restart keepalived
-    
-    - name: create backup
-      copy:
+          #!/bin/bash
+          ROLE=$(psql -U postgres -t -c "select pg_is_in_recovery();" 2>/dev/null | tr -d '[:space:]')
+          if [ "$ROLE" = "f" ]; then
+            exit 0
+          else
+            exit 1
+          fi
+
+    - name: Deploy keepalived.conf
+      template:
         dest: /etc/keepalived/keepalived.conf
-        content: |
-          vrrp_instance VI_1 {
-              state MASTER
-              virtual_interface ens18
-              virtual_router_id 51
-              priority 150
-              advent 1
-              authentication {
-                  auth_type   PASS
-                  auth_pass   P@ssw0rd
-              }
-              virtual_ipaddress {
-                192.168.0.100
-              }
-          }
-        when: inventory_hostname == 'node-2'
-        notify: restart keepalived
+        src: keepalived.conf.j2
           
     - name: Enable keepalived
       service:
