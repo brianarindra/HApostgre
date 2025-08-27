@@ -34,15 +34,6 @@
         state: absent
       when: not pgdata.stat.exists
 
-    - name: Recreate empty data directory
-      file:
-        path: /var/lib/postgresql/16/main
-        state: directory
-        owner: postgres
-        group: postgres
-        mode: '0700'
-      when: not pgdata.stat.exists
-
     - name: Base backup from master (only if data directory is empty)
       become_user: postgres
       command: >
