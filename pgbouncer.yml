@@ -45,15 +45,16 @@
           log_connections = 1
           log_disconnections = 1
       notify: restart package
-      
+
     - name: Generate userlist.txt
       copy:
         dest: /etc/pgbouncer/userlist.txt
         content: |
           {% for u in pgbouncer_users %}
-          "{{ u.name }}" "md5{{ lookup('pipe', 'echo -n ' + u.password + u.name + ' | md5sum | cut -d\" \" -f1') }}"
+          "{{ u.name }}" "md5{{ (u.password + u.name) | to_bytes | hash('md5') }}"
           {% endfor %}
       notify: restart package
+
 
   handlers:
     - name: restart package
