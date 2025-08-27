@@ -27,6 +27,12 @@
       stat:
         path: /var/lib/postgresql/16/main/standby.signal
       register: pgdata
+    
+    - name: remove file if backup not exists
+      file:
+        dest: /var/lib/postgresql/16/main/*
+        state: absent
+      when: not pgdata.stat.exists
 
     - name: Base backup from master (only if data directory is empty)
       become_user: postgres
