@@ -27,18 +27,27 @@
       stat:
         path: /var/lib/postgresql/16/main/standby.signal
       register: pgdata
-    
-    - name: remove file if backup not exists
+
+    - name: Remove data directory if backup not exists
       file:
-        dest: /var/lib/postgresql/16/main/*
+        path: /var/lib/postgresql/16/main
         state: absent
+      when: not pgdata.stat.exists
+
+    - name: Recreate empty data directory
+      file:
+        path: /var/lib/postgresql/16/main
+        state: directory
+        owner: postgres
+        group: postgres
+        mode: '0700'
       when: not pgdata.stat.exists
 
     - name: Base backup from master (only if data directory is empty)
       become_user: postgres
       command: >
         pg_basebackup -h {{ master_ip }} -U {{ replication_user }}
-        -D /var/lib/postgresql/16/main -Fp -Xs -P -R --wal-method=stream --write-recovery-conf --force
+        -D /var/lib/postgresql/16/main -Fp -Xs -P -R 
       environment:
         PGPASSWORD: "{{ replication_password }}"
       when: not pgdata.stat.exists
