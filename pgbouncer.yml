@@ -44,9 +44,7 @@
           default_pool_size = {{ pgbouncer_default_pool_size }}
           log_connections = 1
           log_disconnections = 1
-      owner: pgbouncer
-      group: pgbouncer
-      mode: "0644"
+      notify: restart package
 
     - name: Generate userlist.txt
       copy:
@@ -55,10 +53,7 @@
           {% for u in pgbouncer_users %}
           "{{ u.name }}" "md5{{ (u.password + u.name) | password_hash('md5') }}"
           {% endfor %}
-      owner: pgbouncer
-      group: pgbouncer
-      mode: "0600"
-  
+      notify: restart package
 
   handlers:
     - name: restart package
