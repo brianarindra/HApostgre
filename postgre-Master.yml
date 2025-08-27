@@ -7,7 +7,7 @@
     replication_password: "passwordku"
     postgres_user: postgres
     postgres_password: "prodpassword"
-    slave_ip: 192.168.0.132/32   # Ganti sesuai IP slave
+    slave_ip: 192.168.200.132/32   # Ganti sesuai IP slave
     client_network: 0.0.0.0/0  # jaringan client
   tasks:
     - name: Install PostgreSQL 16 and psycopg2

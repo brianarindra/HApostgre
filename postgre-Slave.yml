@@ -4,7 +4,7 @@
   vars:
     replication_user: replicator
     replication_password: "passwordku"
-    master_ip: 192.168.0.127   # ganti sesuai IP master
+    master_ip: 192.168.200.127   # ganti sesuai IP master
     postgres_user: postgres
     postgres_password: "prodpassword"
     client_ips:
