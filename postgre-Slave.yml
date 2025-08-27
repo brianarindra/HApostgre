@@ -43,6 +43,13 @@
         PGPASSWORD: "{{ replication_password }}"
       when: not pgdata.stat.exists
 
+    - name: Fix ownership of PostgreSQL data directory
+      file:
+        path: /var/lib/postgresql/16/main
+        owner: postgres
+        group: postgres
+        recurse: yes
+
     - name: Configure postgresql.conf to listen on all IPs
       lineinfile:
         path: /etc/postgresql/16/main/postgresql.conf
