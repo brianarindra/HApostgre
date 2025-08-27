@@ -7,14 +7,34 @@
     replication_password: "passwordku"
     postgres_user: postgres
     postgres_password: "prodpassword"
-    slave_ip: 192.168.200.132/32   # Ganti sesuai IP slave
+    slave_ip: 192.168.200.0/24   # Ganti sesuai IP slave
     client_network: 0.0.0.0/0  # jaringan client
+
+
+    pgbouncer_listen_port: 6432
+    pgbouncer_listen_addr: "0.0.0.0"
+
+    pgbouncer_auth_type: "md5"
+    pgbouncer_pool_mode: "session"
+    pgbouncer_default_pool_size: 20
+
+    pgbouncer_users:
+      - { name: "postgres", password: "prodpassword" }
+      - { name: "app_user", password: "abc123" }
+
+    pgbouncer_databases:
+      - { name: "postgres", host: "127.0.0.1", port: 5432 }
+      - { name: "appdb", host: "127.0.0.1", port: 5432 }
+
+
   tasks:
     - name: Install PostgreSQL 16 and psycopg2
       apt:
         name:
           - postgresql-16
           - python3-psycopg2
+          - pgbouncer
+          - python3-passlib
         state: present
 
     - name: Configure postgresql.conf for replication
@@ -38,8 +58,6 @@
         block: |
           # Allow replication from slave
           host  replication {{ replication_user }} {{ slave_ip }} md5
-          # Allow all clients from network to connect as postgres
-          host all {{ postgres_user }} {{ client_network }} md5
       notify: Restart PostgreSQL Master
 
     - name: Wait for PostgreSQL socket to be ready
@@ -64,8 +82,44 @@
         role_attr_flags: "REPLICATION,LOGIN"
       
 
+    - name: Generate pgbouncer.ini
+      copy:
+        dest: /etc/pgbouncer/pgbouncer.ini
+        content: |
+          [databases]
+          {% for db in pgbouncer_databases %}
+          {{ db.name }} = host={{ db.host }} port={{ db.port }} auth_user=postgres
+          {% endfor %}
+
+          [pgbouncer]
+          listen_addr = {{ pgbouncer_listen_addr }}
+          listen_port = {{ pgbouncer_listen_port }}
+          auth_type = {{ pgbouncer_auth_type }}
+          auth_file = /etc/pgbouncer/userlist.txt
+          pool_mode = {{ pgbouncer_pool_mode }}
+          max_client_conn = 100
+          default_pool_size = {{ pgbouncer_default_pool_size }}
+          log_connections = 1
+          log_disconnections = 1
+      notify: restart package
+
+    - name: Generate userlist.txt
+      copy:
+        dest: /etc/pgbouncer/userlist.txt
+        content: |
+          {% for u in pgbouncer_users %}
+          "{{ u.name }}" "{{ u.password }}"
+          {% endfor %}
+      notify: restart package
+
+
   handlers:
     - name: Restart PostgreSQL Master
       service:
         name: postgresql
+        state: restarted
+
+    - name: restart package
+      service:
+        name: pgbouncer
         state: restarted
