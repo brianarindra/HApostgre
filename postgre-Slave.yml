@@ -32,7 +32,7 @@
       become_user: postgres
       command: >
         pg_basebackup -h {{ master_ip }} -U {{ replication_user }}
-        -D /var/lib/postgresql/16/main -Fp -Xs -P -R
+        -D /var/lib/postgresql/16/main -Fp -Xs -P -R --wal-method=stream --write-recovery-conf --force
       environment:
         PGPASSWORD: "{{ replication_password }}"
       when: not pgdata.stat.exists
