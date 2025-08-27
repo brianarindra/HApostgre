@@ -51,7 +51,7 @@
         dest: /etc/pgbouncer/userlist.txt
         content: |
           {% for u in pgbouncer_users %}
-          "{{ u.name }}" "u.password"
+          "{{ u.name }}" "{{ u.password }}"
           {% endfor %}
       notify: restart package
 
