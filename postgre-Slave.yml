@@ -23,14 +23,6 @@
         name: postgresql
         state: stopped
 
-    - name: Create data directory if missing
-      file:
-        path: /var/lib/postgresql/16/main
-        state: directory
-        owner: postgres
-        group: postgres
-        mode: '0700'
-
     - name: Check if data directory exists on slave
       stat:
         path: /var/lib/postgresql/16/main/standby.signal
