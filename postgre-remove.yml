@@ -11,7 +11,7 @@
   
     - name: Stop pgbouncer service
       ansible.builtin.service:
-        name: pgbouncer
+        name: pgbouncer.service
         state: stopped
       ignore_errors: yes
 
