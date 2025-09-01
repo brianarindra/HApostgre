@@ -22,10 +22,13 @@
         state: absent
         purge: yes
       loop:
-          - postgresql-16
-          - python3-psycopg2
-          - pgbouncer
-          - python3-passlib
+        - "postgresql*"
+        - "postgresql-client*"
+        - "postgresql-contrib*"
+        - "postgresql-common"
+        - pgbouncer
+        - python3-psycopg2
+        - python3-passlib
       ignore_errors: yes
 
     - name: Remove PostgreSQL data and configuration directories postgresql
