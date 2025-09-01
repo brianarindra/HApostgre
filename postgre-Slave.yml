@@ -26,6 +26,13 @@
       - { name: "appdb", host: "127.0.0.1", port: 5432 }
 
   tasks:
+    - name: Ensure postgres user exists
+      ansible.builtin.user:
+        name: postgres
+        shell: /bin/false
+        home: /var/lib/postgresql
+        system: yes
+        create_home: yes
 
     - name: Install PostgreSQL 16 and psycopg2
       apt:
