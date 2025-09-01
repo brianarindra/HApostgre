@@ -5,11 +5,16 @@
   tasks:
     - name: Stop PostgreSQL service
       ansible.builtin.service:
-        name: 
-        - postgresql
-        - pgbouncer
+        name: postgresql
         state: stopped
       ignore_errors: yes
+  
+    - name: Stop pgbouncer service
+      ansible.builtin.service:
+        name: pgbouncer
+        state: stopped
+      ignore_errors: yes
+
 
     - name: Uninstall PostgreSQL packages 
       ansible.builtin.apt:
