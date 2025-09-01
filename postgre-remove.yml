@@ -1,0 +1,55 @@
+---
+- name: remove package
+  hosts: "{{ target_hosts }}"
+
+  tasks:
+    - name: Stop PostgreSQL service
+      ansible.builtin.service:
+        name: 
+        - postgresql
+        - pgbouncer
+        state: stopped
+      ignore_errors: yes
+
+    - name: Uninstall PostgreSQL packages 
+      ansible.builtin.apt:
+        name: "{{ item }}"
+        state: absent
+        purge: yes
+      loop:
+          - postgresql-16
+          - python3-psycopg2
+          - pgbouncer
+          - python3-passlib
+      ignore_errors: yes
+
+    - name: Remove PostgreSQL data and configuration directories postgresql
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/postgresql
+        - /var/lib/postgresql
+        - /var/log/postgresql
+        - /var/run/postgresql
+        - /usr/lib/postgresql
+      ignore_errors: yes
+
+    - name: Remove PgBouncer configuration and logs pgbouncer
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/pgbouncer
+        - /var/log/pgbouncer
+        - /var/run/pgbouncer
+      ignore_errors: yes
+
+    - name: Remove PostgreSQL user (optional)
+      ansible.builtin.user:
+        name: postgres
+        state: absent
+        remove: yes
+      ignore_errors: yes
+
+
