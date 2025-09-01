@@ -36,6 +36,7 @@
           - pgbouncer
           - python3-passlib
         state: present
+        update_cache: yes
 
     - name: Configure postgresql.conf for replication
       lineinfile:

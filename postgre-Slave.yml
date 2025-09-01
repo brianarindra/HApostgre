@@ -35,6 +35,7 @@
           - pgbouncer
           - python3-passlib
         state: present
+        update_cache: yes
 
     - name: Stop PostgreSQL on slave
       service:
