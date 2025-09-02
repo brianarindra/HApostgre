@@ -51,7 +51,7 @@
 
     - name: Configure pg_hba.conf for replication and app networks
       copy:
-        dest: "/etc/postgresql/{{ postgres_version }}/main/pg_hba.conf.d/99-replication.conf"
+        dest: "/etc/postgresql/{{ postgres_version }}/main/pg_hba.conf"
         content: |
           # Replication user access
           host    replication     {{ replication_user }}    0.0.0.0/0    md5
