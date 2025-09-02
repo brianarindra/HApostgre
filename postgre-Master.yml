@@ -2,7 +2,7 @@
 # Playbook 1: PostgreSQL 16 Master + PgBouncer (Ubuntu)
 
 - name: Deploy PostgreSQL 16 Master (production)
-  hosts: _master
+  hosts: master
   vars:
     postgres_version: 16
     postgres_port: 5432
