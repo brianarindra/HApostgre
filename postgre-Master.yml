@@ -1,135 +1,155 @@
 ---
-- name: Setup PostgreSQL Master
-  hosts: master
-  become: yes
+# Playbook 1: PostgreSQL 16 Master + PgBouncer (Ubuntu)
+
+- name: Deploy PostgreSQL 16 Master (production)
+  hosts: db_master
   vars:
-    replication_user: replicator
-    replication_password: "passwordku"
-    postgres_user: postgres
-    postgres_password: "prodpassword"
-    slave_ip: 192.168.200.0/24   # Ganti sesuai IP slave
-    client_network: 0.0.0.0/0  # jaringan client
+    postgres_version: 16
+    postgres_port: 5432
+    postgres_listen_addresses: '*'
+    postgres_max_connections: 300
 
+    postgres_admin_user: postgres
+    postgres_db_name: appdb
+    postgres_admin_password: "{{ vault_postgres_admin_password | default('changeme') }}"
+    app_db_user: app_user
+    app_db_password: "{{ vault_app_db_password | default('changeme_app') }}"
 
+    replication_user: repl_user
+    replication_password: "{{ vault_repl_password | default('changeme_repl') }}"
+
+    pgbouncer_listen_addr: '0.0.0.0'
     pgbouncer_listen_port: 6432
-    pgbouncer_listen_addr: "0.0.0.0"
-
-    pgbouncer_auth_type: "md5"
-    pgbouncer_pool_mode: "session"
+    pgbouncer_pool_mode: transaction
     pgbouncer_default_pool_size: 20
-
-    pgbouncer_users:
-      - { name: "postgres", password: "prodpassword" }
-      - { name: "app_user", password: "abc123" }
-
-    pgbouncer_databases:
-      - { name: "postgres", host: "127.0.0.1", port: 5432 }
-      - { name: "appdb", host: "127.0.0.1", port: 5432 }
-
+    pgbouncer_max_client_conn: 1000
 
   tasks:
-
-    - name: Ensure postgres user exists
-      ansible.builtin.user:
-        name: postgres
-        shell: /bin/false
-        home: /var/lib/postgresql
-        system: yes
-        create_home: yes
-
-    - name: Install PostgreSQL 16 and psycopg2
+    - name: Install PostgreSQL 16 and PgBouncer
       apt:
         name:
-          - postgresql-16
-          - python3-psycopg2
+          - postgresql-{{ postgres_version }}
+          - postgresql-contrib
           - pgbouncer
-          - python3-passlib
         state: present
         update_cache: yes
 
-    - name: Configure postgresql.conf for replication
+    - name: Configure postgresql.conf (master)
       lineinfile:
-        path: /etc/postgresql/16/main/postgresql.conf
-        regexp: "{{ item.regexp }}"
-        line: "{{ item.line }}"
+        path: "/etc/postgresql/{{ postgres_version }}/main/postgresql.conf"
+        regexp: '^#?{{ item.key }}\s*='
+        line: "{{ item.key }} = {{ item.value }}"
+        backrefs: yes
       loop:
-        - { regexp: '^#?wal_level', line: 'wal_level = replica' }
-        - { regexp: '^#?archive_mode', line: 'archive_mode = on' }
-        - { regexp: '^#?archive_command', line: "archive_command = 'cp %p /var/lib/postgresql/wal_archive/%f'" }
-        - { regexp: '^#?max_wal_senders', line: 'max_wal_senders = 10' }
-        - { regexp: '^#?wal_keep_size', line: 'wal_keep_size = 256MB' }
-        - { regexp: '^#?hot_standby', line: 'hot_standby = on' }
-        - { regexp: '^#?listen_addresses', line: "listen_addresses = '*'" }
-      notify: Restart PostgreSQL Master
+        - { key: 'listen_addresses', value: 'localhost' }
+        - { key: 'port', value: postgres_port }
+        - { key: 'max_connections', value: postgres_max_connections }
+        - { key: 'wal_level', value: "replica" }
+        - { key: 'max_wal_senders', value: 10 }
+        - { key: 'wal_keep_size', value: '64MB' }
+      notify: Restart postgresql
 
-    - name: Configure pg_hba.conf for replication and clients
-      blockinfile:
-        path: /etc/postgresql/16/main/pg_hba.conf
-        block: |
-          # Allow replication from slave
-          host  replication {{ replication_user }} {{ slave_ip }} md5
-      notify: Restart PostgreSQL Master
+    - name: Configure pg_hba.conf for replication and app networks
+      copy:
+        dest: "/etc/postgresql/{{ postgres_version }}/main/pg_hba.conf.d/99-replication.conf"
+        content: |
+          # Replication user access
+          host    replication     {{ replication_user }}    0.0.0.0/0    md5
+      notify: Restart postgresql
 
-    - name: Wait for PostgreSQL socket to be ready
-      wait_for:
-        path: /var/run/postgresql/.s.PGSQL.5432
-        state: present
-        timeout: 30
-
-    - name: Set password for default postgres user
-      become_user: postgres
+    - name: Ensure replication user exists
       community.postgresql.postgresql_user:
-        name: "{{ postgres_user }}"
-        password: "{{ postgres_password }}"
-        role_attr_flags: "SUPERUSER,CREATEDB,CREATEROLE,LOGIN"
-        login_unix_socket: /var/run/postgresql
-
-    - name: Create replication user
-      become_user: postgres
-      postgresql_user:
         name: "{{ replication_user }}"
         password: "{{ replication_password }}"
-        role_attr_flags: "REPLICATION,LOGIN"
-      
+        role_attr_flags: REPLICATION,LOGIN
+      become_user: postgres
 
-    - name: Generate pgbouncer.ini
+    - name: Ensure app user exists
+      community.postgresql.postgresql_user:
+        name: "{{ app_db_user }}"
+        password: "{{ app_db_password }}"
+        role_attr_flags: CREATEDB,LOGIN
+      become_user: postgres
+
+    - name: Ensure application database exists
+      community.postgresql.postgresql_db:
+        name: "{{ postgres_db_name }}"
+        owner: "{{ app_db_user }}"
+      become_user: postgres
+
+    # --- PgBouncer configuration ---
+    - name: Ensure pgbouncer config directory exists
+      file:
+        path: /etc/pgbouncer
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Create pgbouncer.ini
       copy:
         dest: /etc/pgbouncer/pgbouncer.ini
+        owner: root
+        group: root
+        mode: '0644'
         content: |
           [databases]
-          {% for db in pgbouncer_databases %}
-          {{ db.name }} = host={{ db.host }} port={{ db.port }} auth_user=postgres
-          {% endfor %}
+          {{ postgres_db_name }} = host=127.0.0.1 port={{ postgres_port }} dbname={{ postgres_db_name }} user={{ app_db_user }}
 
           [pgbouncer]
           listen_addr = {{ pgbouncer_listen_addr }}
           listen_port = {{ pgbouncer_listen_port }}
-          auth_type = {{ pgbouncer_auth_type }}
+          auth_type = md5
           auth_file = /etc/pgbouncer/userlist.txt
+          admin_users = {{ postgres_admin_user }}
           pool_mode = {{ pgbouncer_pool_mode }}
-          max_client_conn = 100
           default_pool_size = {{ pgbouncer_default_pool_size }}
-          log_connections = 1
-          log_disconnections = 1
-      notify: restart package
+          max_client_conn = {{ pgbouncer_max_client_conn }}
 
-    - name: Generate userlist.txt
+      notify: Restart pgbouncer
+
+    - name: Generate userlist.txt for PgBouncer
+      shell: |
+        set -e
+        python3 - <<'PY'
+        import hashlib
+        user = "{{ app_db_user }}"
+        password = "{{ app_db_password }}"
+        md5 = hashlib.md5((password + user).encode()).hexdigest()
+        print('"%s" "md5%s"' % (user, md5))
+        PY
+      register: pgb_userlist
+      changed_when: pgb_userlist.stdout != ''
+
+    - name: Write PgBouncer userlist
       copy:
         dest: /etc/pgbouncer/userlist.txt
-        content: |
-          {% for u in pgbouncer_users %}
-          "{{ u.name }}" "{{ u.password }}"
-          {% endfor %}
-      notify: restart package
+        content: "{{ pgb_userlist.stdout }}\n"
+        owner: root
+        group: root
+        mode: '0600'
+      notify: Restart pgbouncer
 
+    - name: Ensure PostgreSQL is enabled and started
+      service:
+        name: postgresql
+        state: started
+        enabled: yes
+
+    - name: Ensure PgBouncer is enabled and started
+      service:
+        name: pgbouncer
+        state: started
+        enabled: yes
 
   handlers:
-    - name: Restart PostgreSQL Master
+    - name: Restart postgresql
       service:
         name: postgresql
         state: restarted
 
-    - name: restart package
+    - name: Restart pgbouncer
       service:
         name: pgbouncer
         state: restarted
+

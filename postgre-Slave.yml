@@ -1,156 +1,132 @@
 ---
-- name: Setup PostgreSQL Slave
+# Playbook 2: PostgreSQL 16 Slave + PgBouncer (Ubuntu)
+
+- name: Deploy PostgreSQL 16 Slave (replica)
   hosts: slave
   vars:
-    replication_user: replicator
-    replication_password: "passwordku"
-    master_ip: 192.168.200.127   # ganti sesuai IP master
-    postgres_user: postgres
-    postgres_password: "prodpassword"
-    client_ips:
-      - 0.0.0.0/0   # contoh laptop/public IP
+    postgres_version: 16
+    postgres_port: 5432
+    postgres_master_host: "{{ ip_master }}" #gunakan external variabel untuk ini
+    replication_user: repl_user
+    replication_password: "{{ vault_repl_password | default('changeme_repl') }}"
 
+    pgbouncer_listen_addr: '0.0.0.0'
     pgbouncer_listen_port: 6432
-    pgbouncer_listen_addr: "0.0.0.0"
-
-    pgbouncer_auth_type: "md5"
-    pgbouncer_pool_mode: "session"
+    pgbouncer_pool_mode: transaction
     pgbouncer_default_pool_size: 20
-
-    pgbouncer_users:
-      - { name: "postgres", password: "prodpassword" }
-      - { name: "app_user", password: "abc123" }
-
-    pgbouncer_databases:
-      - { name: "postgres", host: "127.0.0.1", port: 5432 }
-      - { name: "appdb", host: "127.0.0.1", port: 5432 }
+    pgbouncer_max_client_conn: 1000
+    app_db_user: app_user
+    app_db_password: "{{ vault_app_db_password | default('changeme_app') }}"
+    postgres_db_name: appdb
 
   tasks:
-    - name: Ensure postgres user exists
-      ansible.builtin.user:
-        name: postgres
-        shell: /bin/false
-        home: /var/lib/postgresql
-        system: yes
-        create_home: yes
-
-    - name: Install PostgreSQL 16 and psycopg2
+    - name: Install PostgreSQL 16 and PgBouncer
       apt:
         name:
-          - postgresql-16
-          - python3-psycopg2
+          - postgresql-{{ postgres_version }}
+          - postgresql-contrib
           - pgbouncer
-          - python3-passlib
-          - postgresql-client
         state: present
         update_cache: yes
 
-    - name: Stop PostgreSQL on slave
+    - name: Stop PostgreSQL before base backup
       service:
         name: postgresql
         state: stopped
 
-    - name: Check if data directory exists on slave
-      stat:
-        path: /var/lib/postgresql/16/main/standby.signal
-      register: pgdata
-
-    - name: Remove old PostgreSQL data directory if not replica
+    - name: Clear old data directory
       file:
-        path: /var/lib/postgresql/16/main
+        path: "/var/lib/postgresql/{{ postgres_version }}/main"
         state: absent
-      when: not pgdata.stat.exists
 
-    - name: Base backup from master (only if data directory is empty)
-      become_user: postgres
+    - name: Run pg_basebackup from master
       command: >
-        pg_basebackup -h {{ master_ip }} -U {{ replication_user }}
-        -D /var/lib/postgresql/16/main -Fp -Xs -P -R 
+        pg_basebackup -h {{ postgres_master_host }} -D /var/lib/postgresql/{{ postgres_version }}/main -U {{ replication_user }} -Fp -Xs -P -R
+      become_user: postgres
       environment:
         PGPASSWORD: "{{ replication_password }}"
-      when: not pgdata.stat.exists
 
-    - name: Fix ownership of PostgreSQL data directory
+    - name: Configure postgresql.conf for replica
+      lineinfile:
+        path: "/etc/postgresql/{{ postgres_version }}/main/postgresql.conf"
+        regexp: '^#?{{ item.key }}\s*='
+        line: "{{ item.key }} = {{ item.value }}"
+        backrefs: yes
+      loop:
+        - { key: 'hot_standby', value: 'on' }
+      notify: Restart postgresql
+
+    # --- PgBouncer configuration ---
+    - name: Ensure pgbouncer config directory exists
       file:
-        path: /var/lib/postgresql/16/main
-        owner: postgres
-        group: postgres
-        recurse: yes
+        path: /etc/pgbouncer
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
 
-    - name: Configure postgresql.conf to listen on all IPs
-      lineinfile:
-        path: /etc/postgresql/16/main/postgresql.conf
-        regexp: '^#?listen_addresses'
-        line: "listen_addresses = '*'"
-
-    - name: Enable hot standby on slave
-      lineinfile:
-        path: /etc/postgresql/16/main/postgresql.conf
-        regexp: '^#?hot_standby'
-        line: "hot_standby = on"
-      notify: Restart PostgreSQL
-      
-    - name: Configure pg_hba.conf for replication
-      blockinfile:
-        path: /etc/postgresql/16/main/pg_hba.conf
-        block: |
-          # Allow replication from slave
-          host replication {{ replication_user }} {{ ansible_host }}/32 md5
-      notify: Restart PostgreSQL
-
-    # - name: Configure pg_hba.conf for client access
-    #   blockinfile:
-    #     path: /etc/postgresql/16/main/pg_hba.conf
-    #     block: |
-    #       # Allow client access
-    #       {% for ip in client_ips %}
-    #       host all {{ postgres_user }} {{ ip }} md5
-    #       {% endfor %}
-    #   notify: Restart PostgreSQL
-
-    - name: Start PostgreSQL on slave
-      service:
-        name: postgresql
-        state: started
-
-    - name: Generate pgbouncer.ini
+    - name: Create pgbouncer.ini
       copy:
         dest: /etc/pgbouncer/pgbouncer.ini
+        owner: root
+        group: root
+        mode: '0644'
         content: |
           [databases]
-          {% for db in pgbouncer_databases %}
-          {{ db.name }} = host={{ db.host }} port={{ db.port }} auth_user=postgres
-          {% endfor %}
+          {{ postgres_db_name }} = host=127.0.0.1 port={{ postgres_port }} dbname={{ postgres_db_name }} user={{ app_db_user }}
 
           [pgbouncer]
           listen_addr = {{ pgbouncer_listen_addr }}
           listen_port = {{ pgbouncer_listen_port }}
-          auth_type = {{ pgbouncer_auth_type }}
+          auth_type = md5
           auth_file = /etc/pgbouncer/userlist.txt
+          admin_users = postgres
           pool_mode = {{ pgbouncer_pool_mode }}
-          max_client_conn = 100
           default_pool_size = {{ pgbouncer_default_pool_size }}
-          log_connections = 1
-          log_disconnections = 1
-      notify: restart package
+          max_client_conn = {{ pgbouncer_max_client_conn }}
+      notify: Restart pgbouncer
 
-    - name: Generate userlist.txt
+    - name: Generate userlist.txt for PgBouncer
+      shell: |
+        set -e
+        python3 - <<'PY'
+        import hashlib
+        user = "{{ app_db_user }}"
+        password = "{{ app_db_password }}"
+        md5 = hashlib.md5((password + user).encode()).hexdigest()
+        print('"%s" "md5%s"' % (user, md5))
+        PY
+      register: pgb_userlist
+      changed_when: pgb_userlist.stdout != ''
+
+    - name: Write PgBouncer userlist
       copy:
         dest: /etc/pgbouncer/userlist.txt
-        content: |
-          {% for u in pgbouncer_users %}
-          "{{ u.name }}" "{{ u.password }}"
-          {% endfor %}
-      notify: restart package
+        content: "{{ pgb_userlist.stdout }}\n"
+        owner: root
+        group: root
+        mode: '0600'
+      notify: Restart pgbouncer
 
+    - name: Ensure PostgreSQL is enabled and started
+      service:
+        name: postgresql
+        state: started
+        enabled: yes
+
+    - name: Ensure PgBouncer is enabled and started
+      service:
+        name: pgbouncer
+        state: started
+        enabled: yes
 
   handlers:
-    - name: Restart PostgreSQL
+    - name: Restart postgresql
       service:
         name: postgresql
         state: restarted
 
-    - name: restart package
+    - name: Restart pgbouncer
       service:
         name: pgbouncer
         state: restarted
