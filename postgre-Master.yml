@@ -59,6 +59,12 @@
           host    replication     {{ replication_user }}    0.0.0.0/0    md5
       notify: Restart postgresql
 
+    - name: Wait for PostgreSQL socket to be ready
+      wait_for:
+        path: /var/run/postgresql/.s.PGSQL.5432
+        state: present
+        timeout: 30
+        
     - name: Ensure replication user exists
       postgresql_user:
         name: "{{ replication_user }}"
