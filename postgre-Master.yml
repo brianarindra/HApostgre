@@ -57,19 +57,16 @@
         content: |
           # Replication user access
           host    replication     {{ replication_user }}    0.0.0.0/0    md5
+          # Local connections for postgres user with md5
+          local   all             postgres                               md5
       notify: Restart postgresql
 
-    - name: Wait for PostgreSQL socket to be ready
-      wait_for:
-        path: /var/run/postgresql/.s.PGSQL.5432
-        state: present
-        timeout: 30
-        
     - name: Ensure replication user exists
       postgresql_user:
         name: "{{ replication_user }}"
         password: "{{ replication_password }}"
         role_attr_flags: REPLICATION,LOGIN
+        login_unix_socket: /var/run/postgresql
       become_user: postgres
 
     - name: Ensure app user exists
@@ -77,6 +74,7 @@
         name: "{{ app_db_user }}"
         password: "{{ app_db_password }}"
         role_attr_flags: CREATEDB,LOGIN
+        login_unix_socket: /var/run/postgresql
       become_user: postgres
 
     - name: Ensure application database exists
