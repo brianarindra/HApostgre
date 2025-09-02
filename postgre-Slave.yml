@@ -27,13 +27,15 @@
         home: /var/lib/postgresql
         system: yes
         create_home: yes
-        
+
     - name: Install PostgreSQL 16 and PgBouncer
       apt:
         name:
           - postgresql-{{ postgres_version }}
           - postgresql-contrib
           - pgbouncer
+          - python3-passlib
+          - python3-psycopg2
         state: present
         update_cache: yes
 

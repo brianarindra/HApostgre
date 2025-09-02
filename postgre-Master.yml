@@ -31,6 +31,8 @@
           - postgresql-{{ postgres_version }}
           - postgresql-contrib
           - pgbouncer
+          - python3-passlib
+          - python3-psycopg2
         state: present
         update_cache: yes
 
