@@ -61,6 +61,14 @@
           local   all             postgres                               md5
       notify: Restart postgresql
 
+    - name: Set password for default postgres user
+      become_user: postgres
+      community.postgresql.postgresql_user:
+        name: "{{ postgres_admin_user }}" 
+        password: "{{ postgres_admin_password }}"
+        role_attr_flags: "SUPERUSER,CREATEDB,CREATEROLE,LOGIN"
+        login_unix_socket: /var/run/postgresql
+
     - name: Ensure replication user exists
       become_user: postgres
       postgresql_user:
