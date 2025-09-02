@@ -62,20 +62,21 @@
       notify: Restart postgresql
 
     - name: Ensure replication user exists
+      become_user: postgres
       postgresql_user:
         name: "{{ replication_user }}"
         password: "{{ replication_password }}"
         role_attr_flags: REPLICATION,LOGIN
         login_unix_socket: /var/run/postgresql
-      become_user: postgres
+
 
     - name: Ensure app user exists
+      become_user: postgres
       postgresql_user:
         name: "{{ app_db_user }}"
         password: "{{ app_db_password }}"
         role_attr_flags: CREATEDB,LOGIN
         login_unix_socket: /var/run/postgresql
-      become_user: postgres
 
     - name: Ensure application database exists
       community.postgresql.postgresql_db:
