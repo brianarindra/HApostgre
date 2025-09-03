@@ -67,29 +67,29 @@
 
   tasks:
     # ---- PostgreSQL configs (pakai module agar idempotent) ----
-    - name: Set postgresql.conf parameters (replication, logging, security)
-      community.postgresql.postgresql_conf:
-        name: "{{ item.name }}"
-        value: "{{ item.value }}"
-        state: present
-        restart: no
+    - name: Configure postgresql.conf for production
+      lineinfile:
+        path: "/etc/postgresql/16/main/postgresql.conf"
+        regexp: "^#?{{ item.key }}\\s*="
+        line: "{{ item.key }} = {{ item.value }}"
       loop:
-        - { name: "listen_addresses", value: "{{ listen_addr }}" }
-        - { name: "wal_level",        value: "replica" }
-        - { name: "archive_mode",     value: "on" }
-        - { name: "archive_command",  value: "test -f {{ wal_archive_dir }}/%f || cp %p {{ wal_archive_dir }}/%f" }
-        - { name: "max_wal_senders",  value: "10" }
-        - { name: "wal_keep_size",    value: "256MB" }
-        - { name: "hot_standby",      value: "on" }
-        - { name: "password_encryption", value: "scram-sha-256" }
-        - { name: "logging_collector", value: "on" }
-        - { name: "log_directory",     value: "log" }
-        - { name: "log_filename",      value: "postgresql-%a.log" }
-        - { name: "log_truncate_on_rotation", value: "on" }
-        - { name: "log_rotation_age",  value: "1d" }
-        - { name: "log_line_prefix",   value: "%m [%p] %q%u@%d " }
-        - { name: "max_connections",   value: "200" }  # dengan PgBouncer
+        - { key: "listen_addresses", value: "'*'" }
+        - { key: "wal_level", value: "replica" }
+        - { key: "archive_mode", value: "on" }
+        - { key: "archive_command", value: "'test -f {{ wal_archive_dir }}/%f || cp %p {{ wal_archive_dir }}/%f'" }
+        - { key: "max_wal_senders", value: "10" }
+        - { key: "wal_keep_size", value: "256MB" }
+        - { key: "hot_standby", value: "on" }
+        - { key: "password_encryption", value: "scram-sha-256" }
+        - { key: "logging_collector", value: "on" }
+        - { key: "log_directory", value: "'log'" }
+        - { key: "log_filename", value: "'postgresql-%a.log'" }
+        - { key: "log_truncate_on_rotation", value: "on" }
+        - { key: "log_rotation_age", value: "'1d'" }
+        - { key: "log_line_prefix", value: "'%m [%p] %q%u@%d '" }
+        - { key: "max_connections", value: "200" }
       notify: Restart PostgreSQL
+
 
     - name: Ensure pg_hba.conf rules (replication + client with scram)
       blockinfile:
