@@ -1,170 +1,208 @@
 ---
-# Playbook 1: PostgreSQL 16 Master + PgBouncer (Ubuntu)
-
-- name: Deploy PostgreSQL 16 Master (production)
+- name: Setup PostgreSQL 16 + PgBouncer (Production-Minded)
   hosts: master
   vars:
-    postgres_version: 16
-    postgres_port: 5432
-    postgres_listen_addresses: '*'
-    postgres_max_connections: 300
+    # ---- Jaringan ----
+    slave_cidr: "192.168.200.0/24"     # jaringan standby/replica
+    client_cidr: "10.10.0.0/16"        # jaringan aplikasi/klien (ganti sesuai)
+    listen_addr: "*"                   # prod: batasi di firewall
 
-    postgres_admin_user: postgres
-    postgres_db_name: appdb
-    postgres_admin_password: "{{ vault_postgres_admin_password | default('changeme') }}"
-    app_db_user: app_user
-    app_db_password: "{{ vault_app_db_password | default('changeme_app') }}"
+    # ---- Versi & Path ----
+    pg_version: "16"
+    pg_conf_dir: "/etc/postgresql/16/main"
+    pg_data_dir: "/var/lib/postgresql/16/main"
+    wal_archive_dir: "/var/lib/postgresql/wal_archive"
 
-    replication_user: repl_user
-    replication_password: "{{ vault_repl_password | default('changeme_repl') }}"
+    # ---- Users ----
+    postgres_admin_user: "postgres"
+    replication_user: "replicator"
+    pgbouncer_auth_user: "pgbouncer_auth"  # user khusus untuk auth_query
 
-    pgbouncer_listen_addr: '0.0.0.0'
+    # ---- Password (gunakan Ansible Vault!) ----
+    postgres_admin_password: "{{ vault_postgres_admin_password }}"
+    replication_password: "{{ vault_replication_password }}"
+    pgbouncer_auth_password: "{{ vault_pgbouncer_auth_password }}"
+
+    # ---- PgBouncer ----
+    pgbouncer_listen_addr: "0.0.0.0"
     pgbouncer_listen_port: 6432
-    pgbouncer_pool_mode: transaction
+    pgbouncer_pool_mode: "session"   # "transaction" sering lebih efisien utk web
     pgbouncer_default_pool_size: 20
-    pgbouncer_max_client_conn: 1000
+    pgbouncer_max_client_conn: 200
+    pgbouncer_auth_type: "scram-sha-256"
 
-  tasks:
-    - name: Install PostgreSQL 16 and PgBouncer
+    # Database yang diproksikan
+    pgbouncer_databases:
+      - { name: "postgres", host: "127.0.0.1", port: 5432 }
+      - { name: "appdb",   host: "127.0.0.1", port: 5432 }
+
+  pre_tasks:
+    - name: Install base packages
       apt:
         name:
-          - postgresql-{{ postgres_version }}
-          - postgresql-contrib
+          - postgresql-16
+          - postgresql-client-16
+          - python3-psycopg2
           - pgbouncer
           - python3-passlib
-          - python3-psycopg2
+          - acl
         state: present
         update_cache: yes
 
-    - name: Configure postgresql.conf (master)
-      lineinfile:
-        path: "/etc/postgresql/{{ postgres_version }}/main/postgresql.conf"
-        regexp: '^#?{{ item.key }}\s*='
-        line: "{{ item.key }} = {{ item.value }}"
-        backrefs: yes
+    - name: Ensure postgres system user exists (idempotent)
+      user:
+        name: postgres
+        shell: /usr/sbin/nologin
+        home: /var/lib/postgresql
+        system: yes
+        create_home: yes
+
+    - name: Create WAL archive directory
+      file:
+        path: "{{ wal_archive_dir }}"
+        state: directory
+        owner: postgres
+        group: postgres
+        mode: "0700"
+
+  tasks:
+    # ---- PostgreSQL configs (pakai module agar idempotent) ----
+    - name: Set postgresql.conf parameters (replication, logging, security)
+      community.postgresql.postgresql_conf:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        state: present
+        restart: no
       loop:
-        - { key: 'listen_addresses', value: 'localhost' }
-        - { key: 'port', value: postgres_port }
-        - { key: 'max_connections', value: postgres_max_connections }
-        - { key: 'wal_level', value: "replica" }
-        - { key: 'max_wal_senders', value: 10 }
-        - { key: 'wal_keep_size', value: '64MB' }
-      notify: Restart postgresql
+        - { name: "listen_addresses", value: "{{ listen_addr }}" }
+        - { name: "wal_level",        value: "replica" }
+        - { name: "archive_mode",     value: "on" }
+        - { name: "archive_command",  value: "test -f {{ wal_archive_dir }}/%f || cp %p {{ wal_archive_dir }}/%f" }
+        - { name: "max_wal_senders",  value: "10" }
+        - { name: "wal_keep_size",    value: "256MB" }
+        - { name: "hot_standby",      value: "on" }
+        - { name: "password_encryption", value: "scram-sha-256" }
+        - { name: "logging_collector", value: "on" }
+        - { name: "log_directory",     value: "log" }
+        - { name: "log_filename",      value: "postgresql-%a.log" }
+        - { name: "log_truncate_on_rotation", value: "on" }
+        - { name: "log_rotation_age",  value: "1d" }
+        - { name: "log_line_prefix",   value: "%m [%p] %q%u@%d " }
+        - { name: "max_connections",   value: "200" }  # dengan PgBouncer
+      notify: Restart PostgreSQL
 
-    - name: Configure pg_hba.conf for replication and app networks
-      copy:
-        dest: "/etc/postgresql/{{ postgres_version }}/main/pg_hba.conf"
-        content: |
-          # Replication user access
-          host    replication     {{ replication_user }}    0.0.0.0/0    md5
-          # Local connections for postgres user with md5
-          local   all             postgres                               md5
-      notify: Restart postgresql
+    - name: Ensure pg_hba.conf rules (replication + client with scram)
+      blockinfile:
+        path: "{{ pg_conf_dir }}/pg_hba.conf"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK (prod rules)"
+        block: |
+          # Replication from standby nodes
+          host    replication  {{ replication_user }}   {{ slave_cidr }}   scram-sha-256
 
-    - name: Set password for default postgres user
+          # Client access to databases from app network
+          host    all          all                      {{ client_cidr }}  scram-sha-256
+
+          # Local socket
+          local   all          all                                      scram-sha-256
+      notify: Reload PostgreSQL
+
+    - name: Wait for PostgreSQL socket
+      wait_for:
+        path: "/var/run/postgresql/.s.PGSQL.5432"
+        state: present
+        timeout: 30
+
+    - name: Set password & attributes for postgres superuser
       become_user: postgres
       community.postgresql.postgresql_user:
-        name: "{{ postgres_admin_user }}" 
+        name: "{{ postgres_admin_user }}"
         password: "{{ postgres_admin_password }}"
         role_attr_flags: "SUPERUSER,CREATEDB,CREATEROLE,LOGIN"
         login_unix_socket: /var/run/postgresql
 
-    - name: Ensure replication user exists
+    - name: Ensure replication user (scram)
       become_user: postgres
-      postgresql_user:
+      community.postgresql.postgresql_user:
         name: "{{ replication_user }}"
         password: "{{ replication_password }}"
-        role_attr_flags: REPLICATION,LOGIN
+        role_attr_flags: "REPLICATION,LOGIN"
         login_unix_socket: /var/run/postgresql
 
-
-    - name: Ensure app user exists
+    - name: Create PgBouncer auth user (non-superuser) for auth_query
       become_user: postgres
-      postgresql_user:
-        name: "{{ app_db_user }}"
-        password: "{{ app_db_password }}"
-        role_attr_flags: CREATEDB,LOGIN
+      community.postgresql.postgresql_user:
+        name: "{{ pgbouncer_auth_user }}"
+        password: "{{ pgbouncer_auth_password }}"
+        role_attr_flags: "LOGIN"
         login_unix_socket: /var/run/postgresql
 
-    - name: Ensure application database exists
-      community.postgresql.postgresql_db:
-        name: "{{ postgres_db_name }}"
-        owner: "{{ app_db_user }}"
+    - name: Create helper VIEW for PgBouncer SCRAM auth (if not exists)
       become_user: postgres
+      community.postgresql.postgresql_query:
+        db: "postgres"
+        login_unix_socket: /var/run/postgresql
+        query: |
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n
+                           ON n.oid=c.relnamespace
+                           WHERE n.nspname='public' AND c.relname='pgbouncer_users') THEN
+              CREATE VIEW public.pgbouncer_users AS
+              SELECT usename AS username, passwd AS password
+              FROM pg_catalog.pg_shadow;
+              REVOKE ALL ON public.pgbouncer_users FROM PUBLIC;
+              GRANT SELECT ON public.pgbouncer_users TO "{{ pgbouncer_auth_user }}";
+            END IF;
+          END$$;
 
-    # --- PgBouncer configuration ---
-    - name: Ensure pgbouncer config directory exists
-      file:
-        path: /etc/pgbouncer
-        state: directory
-        owner: root
-        group: root
-        mode: '0755'
-
-    - name: Create pgbouncer.ini
+    # ---- PgBouncer config dengan auth_query (SCRAM) ----
+    - name: Generate pgbouncer.ini
       copy:
         dest: /etc/pgbouncer/pgbouncer.ini
-        owner: root
-        group: root
-        mode: '0644'
+        owner: pgbouncer
+        group: pgbouncer
+        mode: "0600"
         content: |
           [databases]
-          {{ postgres_db_name }} = host=127.0.0.1 port={{ postgres_port }} dbname={{ postgres_db_name }} user={{ app_db_user }}
+          {% for db in pgbouncer_databases %}
+          {{ db.name }} = host={{ db.host }} port={{ db.port }}
+          {% endfor %}
 
           [pgbouncer]
           listen_addr = {{ pgbouncer_listen_addr }}
           listen_port = {{ pgbouncer_listen_port }}
-          auth_type = md5
-          auth_file = /etc/pgbouncer/userlist.txt
-          admin_users = {{ postgres_admin_user }}
-          pool_mode = {{ pgbouncer_pool_mode }}
+          auth_type   = {{ pgbouncer_auth_type }}
+          # Auth via query ke view yang kita buat
+          auth_query  = SELECT username, password FROM public.pgbouncer_users WHERE username=$1
+          pool_mode   = {{ pgbouncer_pool_mode }}
+          max_client_conn   = {{ pgbouncer_max_client_conn }}
           default_pool_size = {{ pgbouncer_default_pool_size }}
-          max_client_conn = {{ pgbouncer_max_client_conn }}
+          log_connections = 1
+          log_disconnections = 1
+          # Startup parameters agar kompatibel:
+          ignore_startup_parameters = extra_float_digits
 
-      notify: Restart pgbouncer
+    - name: Ensure pgbouncer service file perms are strict
+      file:
+        path: /etc/pgbouncer
+        state: directory
+        owner: pgbouncer
+        group: pgbouncer
+        mode: "0750"
 
-    - name: Generate userlist.txt for PgBouncer
-      shell: |
-        set -e
-        python3 - <<'PY'
-        import hashlib
-        user = "{{ app_db_user }}"
-        password = "{{ app_db_password }}"
-        md5 = hashlib.md5((password + user).encode()).hexdigest()
-        print('"%s" "md5%s"' % (user, md5))
-        PY
-      register: pgb_userlist
-      changed_when: pgb_userlist.stdout != ''
-
-    - name: Write PgBouncer userlist
-      copy:
-        dest: /etc/pgbouncer/userlist.txt
-        content: "{{ pgb_userlist.stdout }}\n"
-        owner: root
-        group: root
-        mode: '0600'
-      notify: Restart pgbouncer
-
-    - name: Ensure PostgreSQL is enabled and started
-      service:
-        name: postgresql
-        state: started
-        enabled: yes
-
-    - name: Ensure PgBouncer is enabled and started
+    - name: Ensure PgBouncer started and enabled
       service:
         name: pgbouncer
         state: started
         enabled: yes
 
   handlers:
-    - name: Restart postgresql
+    - name: Reload PostgreSQL
+      service:
+        name: postgresql
+        state: reloaded
+
+    - name: Restart PostgreSQL
       service:
         name: postgresql
         state: restarted
-
-    - name: Restart pgbouncer
-      service:
-        name: pgbouncer
-        state: restarted
-
