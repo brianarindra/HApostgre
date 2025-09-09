@@ -92,6 +92,8 @@
         role_attr_flags: "REPLICATION,LOGIN"
       
 
+    # ================= PG BOUNCER ==================
+
     - name: Generate pgbouncer.ini
       copy:
         dest: /etc/pgbouncer/pgbouncer.ini
@@ -122,6 +124,22 @@
           {% endfor %}
       notify: restart package
 
+    # ================= Kamailio tambahan ==================
+    - name: Install Kamailio
+      apt:
+        name:
+          - kamailio
+          - kamailio-postgres-modules
+        state: present
+        update_cache: yes
+
+    - name: Configure kamailio.cfg to use PostgreSQL via PgBouncer
+      lineinfile:
+        path: /etc/kamailio/kamailio.cfg
+        regexp: '^#!define DBURL'
+        line: '#!define DBURL "postgres://app_user:abc123@127.0.0.1:6432/appdb"'
+        create: yes
+      notify: restart kamailio
 
   handlers:
     - name: Restart PostgreSQL Master
@@ -132,4 +150,9 @@
     - name: restart package
       service:
         name: pgbouncer
+        state: restarted
+
+    - name: restart kamailio
+      service:
+        name: kamailio
         state: restarted
